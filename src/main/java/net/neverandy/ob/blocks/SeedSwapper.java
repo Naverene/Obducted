@@ -135,6 +135,7 @@ public class SeedSwapper extends Block
     {
         DimensionType[] dimensionTypes = DimensionType.values();
         int dimension = world.provider.getDimension();
+        logger.debug("dimension: " + dimension);
         ArrayList<Integer> dimensions = new ArrayList();
 
         for (DimensionType dimensionType : dimensionTypes)
@@ -142,13 +143,14 @@ public class SeedSwapper extends Block
             int[] temp=DimensionManager.getDimensions(dimensionType);
             for (int aTemp : temp)
             {
-                if(aTemp!=dimension)
+                if(aTemp != dimension)
                 {
+                    logger.debug("aTemp: " + aTemp);
                     dimensions.add(aTemp);
                 }
             }
         }
-        this.chosenDim=dimensions.get(world.rand.nextInt(dimensions.size()));
+        this.chosenDim=dimensions.get(world.rand.nextInt(dimensions.size()+1));
         logger.info("getChosenDim: " + this.chosenDim);
         return chosenDim;
     }

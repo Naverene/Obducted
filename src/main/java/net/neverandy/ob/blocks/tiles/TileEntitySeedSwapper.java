@@ -11,6 +11,7 @@ import net.minecraft.util.EnumFacing;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.text.ChatType;
 import net.minecraft.util.text.TextComponentString;
+import net.minecraft.world.DimensionType;
 import net.minecraft.world.World;
 import net.minecraftforge.common.DimensionManager;
 import net.neverandy.ob.blocks.SeedSwapper;
@@ -80,30 +81,40 @@ public class TileEntitySeedSwapper extends TileEntity
 
     public boolean onBlockActivated(World world, BlockPos pos, EntityPlayer player, EnumFacing facing, float hitX, float hitY, float hitZ)
     {
-        ArrayList<Integer[]> ids = new ArrayList<>();
-        String name;
-        GuiIngame guiIngame = null;
+        Integer[] ids = DimensionManager.getIDs();
+        GuiIngame guiIngame;
         if (!world.isRemote)
         {
-            ids.add(DimensionManager.getIDs());
-
             guiIngame = new GuiIngame(Minecraft.getMinecraft());
+            /*
             for (int i = 0; i < DimensionManager.getIDs().length; i++)
             {
-                String dim = "ID: " + ids.get(i).toString();
+                String dim = "ID: " + ids[i];
                 guiIngame.addChatMessage(ChatType.CHAT, new TextComponentString(dim));
                 logger.log(Level.INFO, dim);
             }
-            //Destination Dimension world object
+
+             */
+            ArrayList<Integer> dimensions = new ArrayList();
+            DimensionType[] dimensionTypes = DimensionType.values();
+            int dimension = world.provider.getDimension();
+            for (DimensionType dimensionType : dimensionTypes)
+            {
+                int[] temp=DimensionManager.getDimensions(dimensionType);
+                for (int aTemp : temp)
+                {
+                    if(aTemp!=dimension)
+                    {
+                        dimensions.add(aTemp);
+                        String dim = "ID: " + aTemp;
+                        guiIngame.addChatMessage(ChatType.CHAT, new TextComponentString(dim));
+                    }
+                }
+            }
             logger.info("TE onBlockActivated: " + this.chosenDim, Level.INFO);
+            //Destination Dimension world object
             World dest = DimensionManager.getWorld(this.chosenDim);
             //DimensionManager.getWorld(this.chosenDim);
-            if (!dest.isRemote)
-            {
-                logger.debug("Destination is null!");
-                return false;
-            }
-
             ArrayList<CustomBlock> startingDim;
             ArrayList<CustomBlock> swapDim;
 
