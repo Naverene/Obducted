@@ -1,0 +1,16 @@
+[
+{
+  "modid": "ob",
+  "name": "Obducted",
+  "description": "An Idea spawn from the game Obduction",
+  "version": "${version}",
+  "mcversion": "${mcversion}",
+  "url": "",
+  "updateUrl": "",
+  "authorList": ["awweaver"],
+  "credits": "The people at Cyan for making the game that inspired this mod",
+  "logoFile": "",
+  "screenshots": [],
+  "dependencies": []
+}
+]

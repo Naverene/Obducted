@@ -1,0 +1,12 @@
+{
+  "parent": "block/cube",
+  "textures": {
+    "down": "ob:blocks/seedswapper/seedswapperbottom",
+    "up": "ob:blocks/seedswapper/seedswappertop",
+    "east": "ob:blocks/seedswapper/seedswapperside",
+    "west": "ob:blocks/seedswapper/seedswapperside",
+    "north": "ob:blocks/seedswapper/seedswapperside",
+    "south": "ob:blocks/seedswapper/seedswapperside",
+    "front": "ob:blocks/seedswapper/seedswapperfront"
+  }
+}
