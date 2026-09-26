@@ -55,7 +55,14 @@ public class SwapTeleporter extends Teleporter
     {
         if (entity.dimension == dimension)
         {
-            entity.setPositionAndUpdate(x, y, z);
+            if (entity instanceof EntityPlayerMP)
+            {
+                ((EntityPlayerMP) entity).playerNetServerHandler.setPlayerLocation(x, y, z, entity.rotationYaw, entity.rotationPitch);
+            }
+            else
+            {
+                entity.setLocationAndAngles(x, y, z, entity.rotationYaw, entity.rotationPitch);
+            }
             return entity;
         }
 
