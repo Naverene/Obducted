@@ -14,14 +14,14 @@ import net.minecraft.tileentity.TileEntity;
 import net.minecraft.util.EnumFacing;
 import net.minecraft.util.EnumHand;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.world.DimensionType;
+import net.minecraft.util.text.TextComponentString;
 import net.minecraft.world.World;
+import net.minecraft.world.WorldServer;
 import net.minecraftforge.client.model.ModelLoader;
 import net.minecraftforge.common.DimensionManager;
 import net.minecraftforge.fml.relauncher.Side;
 import net.minecraftforge.fml.relauncher.SideOnly;
 import net.neverandy.ob.blocks.tiles.TileEntitySeedSwapper;
-import org.apache.logging.log4j.Level;
 
 import javax.annotation.Nullable;
 import java.util.*;
@@ -34,9 +34,6 @@ import static net.neverandy.ob.Obducted.tab;
  */
 public class SeedSwapper extends Block
 {
-    private int chosenDim;
-    private int radius = 5;
-
     public SeedSwapper(Material blockMaterialIn, MapColor blockMapColorIn)
     {
 
@@ -59,8 +56,7 @@ public class SeedSwapper extends Block
     @Override
     public TileEntity createTileEntity(World world, IBlockState state)
     {
-        return new TileEntitySeedSwapper(this.chosenDim);
-
+        return new TileEntitySeedSwapper();
     }
 
     @Override
@@ -72,51 +68,58 @@ public class SeedSwapper extends Block
     @Override
     public void onBlockPlacedBy(World worldIn, BlockPos pos, IBlockState state, EntityLivingBase placer, ItemStack stack)
     {
-        if (!worldIn.isRemote)
+        if (worldIn.isRemote)
         {
-            getChosenDim(worldIn);
-            //this.chosenDim = getChosenDim(worldIn);
-            logger.info("onBlockPLaced, ChosenDim: " + this.chosenDim);
-            World targetDim = worldIn.getMinecraftServer().getWorld(this.chosenDim);
-            if(targetDim == null)
-            {
-                return;
-            }
-            IBlockState blockState = targetDim.getBlockState(pos);
-            if (blockState == null)
-            {
-                return;
-            }
+            return;
+        }
 
-            if (!(blockState instanceof SeedSwapper))
+        TileEntity te = worldIn.getTileEntity(pos);
+        if (!(te instanceof TileEntitySeedSwapper))
+        {
+            return;
+        }
+
+        int sourceDim = worldIn.provider.getDimension();
+        Integer chosenDim = pickTargetDim(worldIn);
+        WorldServer targetDim = chosenDim == null ? null : worldIn.getMinecraftServer().getWorld(chosenDim);
+        if (targetDim == null)
+        {
+            logger.warn("Seed swapper placed in dim " + sourceDim + " but no other dimension could be loaded");
+            if (placer instanceof EntityPlayer)
             {
-                logger.info("Original Dimension ID: " + worldIn.provider.getDimension());
-                if (targetDim.setBlockState(pos, OBBlock.seedSwapper.getDefaultState()))
-                {
-                    logger.info("Set partner swapper at X: " + pos.getX() + " Y: " + pos.getY() + " Z: " + pos.getZ() + " dim:  " + this.chosenDim);
-                    TileEntitySeedSwapper swapper = new TileEntitySeedSwapper(worldIn.provider.getDimension());
-                    targetDim.setTileEntity(pos, swapper);
-                    swapper.setData(worldIn.provider.getDimension(), this.radius);
-                }
-                //TileEntitySeedSwapper te = (TileEntitySeedSwapper) targetDim.getTileEntity(x, y, z);
-                logger.info("Chosen Dim: " + this.chosenDim + " Radius: " + this.radius, Level.INFO);
-                //te.setData(world.provider.dimensionId, this.radius);
-                //Obducted.network.sendToServer(new SeedSwapperMessage("swapper", x, y, z, world.provider.dimensionId, this.chosenDim, this.radius));
+                placer.sendMessage(new TextComponentString("The swapper couldn't find another dimension to link to."));
             }
+            return;
+        }
+
+        //Each placed swapper remembers its own target on its tile entity
+        ((TileEntitySeedSwapper) te).setData(chosenDim, TileEntitySeedSwapper.DEFAULT_RADIUS);
+
+        //Put a partner swapper in the target dimension that points back here
+        if (!(targetDim.getBlockState(pos).getBlock() instanceof SeedSwapper))
+        {
+            targetDim.setBlockState(pos, getDefaultState());
+        }
+        TileEntity partner = targetDim.getTileEntity(pos);
+        if (partner instanceof TileEntitySeedSwapper)
+        {
+            ((TileEntitySeedSwapper) partner).setData(sourceDim, TileEntitySeedSwapper.DEFAULT_RADIUS);
+            logger.info("Linked seed swapper at " + pos + " between dim " + sourceDim + " and dim " + chosenDim);
         }
     }
 
     @Override
     public boolean onBlockActivated(World worldIn, BlockPos pos, IBlockState state, EntityPlayer playerIn, EnumHand hand, EnumFacing facing, float hitX, float hitY, float hitZ)
     {
-        if (!worldIn.isRemote)
+        //Only react once per click, not once per hand
+        if (worldIn.isRemote || hand != EnumHand.MAIN_HAND)
         {
-            //this.dimID = getChosenDim(worldIn);
-            logger.log(Level.INFO, "onBlockActivated, line 185");
-            TileEntitySeedSwapper te = (TileEntitySeedSwapper) worldIn.getTileEntity(pos);
-            te.setData(this.chosenDim, this.radius);
-            logger.log(Level.INFO, "onBlockActivated, ChosenDim: " + this.chosenDim);
-            return te.onBlockActivated(worldIn, pos, playerIn, facing, hitX, hitY, hitZ);
+            return true;
+        }
+        TileEntity te = worldIn.getTileEntity(pos);
+        if (te instanceof TileEntitySeedSwapper)
+        {
+            return ((TileEntitySeedSwapper) te).onBlockActivated(worldIn, pos, playerIn);
         }
         return true;
     }
@@ -126,39 +129,26 @@ public class SeedSwapper extends Block
         return Item.getItemFromBlock(OBBlock.seedSwapper);
     }
 
-    public void setData(int dimID, int radius)
+    /**
+     * Picks a random registered dimension other than the one the world is in, or null if there isn't one.
+     */
+    @Nullable
+    private static Integer pickTargetDim(World world)
     {
-
-    }
-
-    public int getChosenDim(World world)
-    {
-        DimensionType[] dimensionTypes = DimensionType.values();
         int dimension = world.provider.getDimension();
-        logger.debug("dimension: " + dimension);
-        ArrayList<Integer> dimensions = new ArrayList();
-
-        for (DimensionType dimensionType : dimensionTypes)
+        List<Integer> dimensions = new ArrayList<>();
+        for (int id : DimensionManager.getStaticDimensionIDs())
         {
-            int[] temp=DimensionManager.getDimensions(dimensionType);
-            for (int aTemp : temp)
+            if (id != dimension)
             {
-                if(aTemp != dimension)
-                {
-                    logger.debug("aTemp: " + aTemp);
-                    dimensions.add(aTemp);
-                }
+                dimensions.add(id);
             }
         }
-        this.chosenDim=dimensions.get(world.rand.nextInt(dimensions.size()+1));
-        logger.info("getChosenDim: " + this.chosenDim);
-        return chosenDim;
-    }
-
-    public void setChosenDim(int dim)
-    {
-        this.chosenDim = dim;
-        logger.info("Setting Chosen Dim to: " + dim);
+        if (dimensions.isEmpty())
+        {
+            return null;
+        }
+        return dimensions.get(world.rand.nextInt(dimensions.size()));
     }
 
 }
