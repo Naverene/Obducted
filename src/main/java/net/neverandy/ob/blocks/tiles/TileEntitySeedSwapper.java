@@ -129,6 +129,10 @@ public class TileEntitySeedSwapper extends TileEntity
             }
         }
 
+        //Finish generating both areas first, otherwise world generation (trees, ores, structures) runs later and overwrites the swapped blocks
+        prepareArea((WorldServer) world, pos, this.radius);
+        prepareArea(dest, pos, this.radius);
+
         ArrayList<CustomBlock> startingDim = getSphere(world, pos, this.radius); //Get sphere from current dimension
         ArrayList<CustomBlock> swapDim = getSphere(dest, pos, this.radius); //Get sphere from target dimension
 
@@ -152,6 +156,26 @@ public class TileEntitySeedSwapper extends TileEntity
             }
         }
         return true;
+    }
+
+    /**
+     * Loads the chunks the sphere touches plus one chunk around them. A chunk is only decorated (trees, ores,
+     * structures) once its neighbours are loaded, and decoration spills half a chunk into the next one, so this
+     * makes sure no decoration is still pending for the blocks we are about to swap.
+     */
+    private static void prepareArea(WorldServer world, BlockPos pos, int radius)
+    {
+        int minCx = ((pos.getX() - radius) >> 4) - 1;
+        int maxCx = ((pos.getX() + radius) >> 4) + 1;
+        int minCz = ((pos.getZ() - radius) >> 4) - 1;
+        int maxCz = ((pos.getZ() + radius) >> 4) + 1;
+        for (int cx = minCx; cx <= maxCx; cx++)
+        {
+            for (int cz = minCz; cz <= maxCz; cz++)
+            {
+                world.getChunkProvider().provideChunk(cx, cz);
+            }
+        }
     }
 
     private void setBlocks(ArrayList<CustomBlock> blocks, World world)
