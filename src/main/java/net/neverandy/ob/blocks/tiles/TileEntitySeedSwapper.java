@@ -1,26 +1,23 @@
 package net.neverandy.ob.blocks.tiles;
 
-import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiIngame;
-import net.minecraft.entity.EntityLiving;
+import java.util.ArrayList;
+import java.util.List;
+
+import net.minecraft.block.Block;
+import net.minecraft.entity.EntityLivingBase;
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.init.Blocks;
 import net.minecraft.nbt.NBTTagCompound;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.tileentity.TileEntity;
-import net.minecraft.util.EnumFacing;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.text.ChatType;
-import net.minecraft.util.text.TextComponentString;
-import net.minecraft.world.DimensionType;
+import net.minecraft.util.AxisAlignedBB;
+import net.minecraft.util.ChatComponentText;
 import net.minecraft.world.World;
+import net.minecraft.world.WorldServer;
 import net.minecraftforge.common.DimensionManager;
 import net.neverandy.ob.blocks.SeedSwapper;
 import net.neverandy.ob.util.CustomBlock;
-import net.neverandy.ob.util.Teleporter;
-import org.apache.logging.log4j.Level;
-
-import java.util.ArrayList;
-import java.util.List;
+import net.neverandy.ob.util.SwapTeleporter;
 
 import static net.neverandy.ob.Obducted.logger;
 
@@ -29,17 +26,16 @@ import static net.neverandy.ob.Obducted.logger;
  */
 public class TileEntitySeedSwapper extends TileEntity
 {
+    public static final int DEFAULT_RADIUS = 5;
+
     private int chosenDim;
-    private int radius;
+    private int radius = DEFAULT_RADIUS;
+    // Without this a freshly created swapper would look like it points at dimension 0
+    private boolean linked = false;
 
     public TileEntitySeedSwapper() //Complains if this isn't here
     {
         //Nothing goes here
-    }
-
-    public TileEntitySeedSwapper(int dimID)
-    {
-        this.chosenDim = dimID;
     }
 
     @Override
@@ -47,201 +43,162 @@ public class TileEntitySeedSwapper extends TileEntity
     {
         super.readFromNBT(nbt);
 
-        this.radius = nbt.getInteger("radius");
+        this.radius = nbt.hasKey("radius") ? nbt.getInteger("radius") : DEFAULT_RADIUS;
         this.chosenDim = nbt.getInteger("targetDim");
+        this.linked = nbt.getBoolean("linked");
     }
 
     @Override
-    public NBTTagCompound writeToNBT(NBTTagCompound nbt)
+    public void writeToNBT(NBTTagCompound nbt)
     {
         super.writeToNBT(nbt);
 
         nbt.setInteger("targetDim", this.chosenDim);
         nbt.setInteger("radius", this.radius);
-
-        return nbt;
+        nbt.setBoolean("linked", this.linked);
     }
 
     public void setData(int dimID, int radius)
     {
-        if (dimID == Integer.MIN_VALUE)
-        {
-            World world = Minecraft.getMinecraft().world;
-            SeedSwapper swapper = (SeedSwapper) world.getBlockState(pos).getBlock();
-            logger.info("Chosen Dim: " + this.chosenDim);
-        } else
-        {
-            this.chosenDim = dimID;
-        }
-
+        this.chosenDim = dimID;
         this.radius = radius;
-        logger.info("TE setData, chosenDim: " + this.chosenDim + " dimID: " + dimID);
+        this.linked = true;
+        logger.debug("TE setData, chosenDim: " + this.chosenDim + " radius: " + radius);
         this.markDirty();
     }
 
-    public boolean onBlockActivated(World world, BlockPos pos, EntityPlayer player, EnumFacing facing, float hitX, float hitY, float hitZ)
+    public boolean isLinked()
     {
-        Integer[] ids = DimensionManager.getIDs();
-        GuiIngame guiIngame;
-        if (!world.isRemote)
+        return linked;
+    }
+
+    public int getChosenDim()
+    {
+        return chosenDim;
+    }
+
+    public boolean onBlockActivated(World world, int x, int y, int z, EntityPlayer player)
+    {
+        if (world.isRemote)
         {
-            guiIngame = new GuiIngame(Minecraft.getMinecraft());
-            /*
-            for (int i = 0; i < DimensionManager.getIDs().length; i++)
+            return true;
+        }
+
+        //Just as in the game that this idea came from, this requires two things to happen, Move the "lever" then click the block.
+        if (!world.isBlockIndirectlyGettingPowered(x, y, z))
+        {
+            player.addChatMessage(new ChatComponentText("The swapper needs redstone power."));
+            return true;
+        }
+
+        int sourceDim = world.provider.dimensionId;
+        if (!linked || chosenDim == sourceDim || !DimensionManager.isDimensionRegistered(chosenDim))
+        {
+            logger.warn("Seed swapper at " + x + ", " + y + ", " + z + " in dim " + sourceDim + " has no valid target (target: " + chosenDim + ", linked: " + linked + ")");
+            player.addChatMessage(new ChatComponentText("This swapper isn't linked to another dimension. Break it and place it again."));
+            return true;
+        }
+
+        //Loads the target dimension if nobody is in it (DimensionManager.getWorld would just return null)
+        WorldServer dest = MinecraftServer.getServer().worldServerForDimension(chosenDim);
+        if (dest == null)
+        {
+            player.addChatMessage(new ChatComponentText("Dimension " + chosenDim + " could not be loaded."));
+            return true;
+        }
+
+        //Make sure the partner points back here so the trip can be reversed
+        TileEntity partner = dest.getTileEntity(x, y, z);
+        if (partner instanceof TileEntitySeedSwapper)
+        {
+            ((TileEntitySeedSwapper) partner).setData(sourceDim, this.radius);
+        }
+
+        //Grab everything that should come along before anything moves
+        double cx = x + 0.5, cy = y + 0.5, cz = z + 0.5;
+        AxisAlignedBB area = AxisAlignedBB.getBoundingBox(cx - radius, cy - radius, cz - radius, cx + radius, cy + radius, cz + radius);
+        List<EntityLivingBase> passengers = new ArrayList<>();
+        for (Object o : world.getEntitiesWithinAABB(EntityLivingBase.class, area))
+        {
+            EntityLivingBase e = (EntityLivingBase) o;
+            if (e != player && e.ridingEntity == null && e.riddenByEntity == null && e.getDistanceSq(cx, cy, cz) <= radius * radius)
             {
-                String dim = "ID: " + ids[i];
-                guiIngame.addChatMessage(ChatType.CHAT, new TextComponentString(dim));
-                logger.log(Level.INFO, dim);
+                passengers.add(e);
             }
+        }
 
-             */
-            ArrayList<Integer> dimensions = new ArrayList();
-            DimensionType[] dimensionTypes = DimensionType.values();
-            int dimension = world.provider.getDimension();
-            for (DimensionType dimensionType : dimensionTypes)
+        List<CustomBlock> startingDim = getSphere(world, x, y, z, this.radius); //Get sphere from current dimension
+        List<CustomBlock> swapDim = getSphere(dest, x, y, z, this.radius); //Get sphere from target dimension
+
+        //Set current dimension blocks to target dim blocks
+        setBlocks(swapDim, world);
+
+        //Set target dim blocks to current dim blocks
+        setBlocks(startingDim, dest);
+
+        //Teleport the player, then everything else that was inside the sphere
+        if (player.ridingEntity != null)
+        {
+            player.mountEntity(null);
+        }
+        SwapTeleporter.teleport(player, chosenDim, player.posX, player.posY, player.posZ);
+        for (EntityLivingBase e : passengers)
+        {
+            if (!e.isDead)
             {
-                int[] temp=DimensionManager.getDimensions(dimensionType);
-                for (int aTemp : temp)
-                {
-                    if(aTemp!=dimension)
-                    {
-                        dimensions.add(aTemp);
-                        String dim = "ID: " + aTemp;
-                        guiIngame.addChatMessage(ChatType.CHAT, new TextComponentString(dim));
-                    }
-                }
+                SwapTeleporter.teleport(e, chosenDim, e.posX, e.posY, e.posZ);
             }
-            logger.info("TE onBlockActivated: " + this.chosenDim, Level.INFO);
-            //Destination Dimension world object
-            World dest = DimensionManager.getWorld(this.chosenDim);
-            //DimensionManager.getWorld(this.chosenDim);
-            ArrayList<CustomBlock> startingDim;
-            ArrayList<CustomBlock> swapDim;
-
-            //Just as in the game that this idea came from, this requires two things to happen, Move the "lever" then click the block.
-            if (hasRedstonePower(this.pos, world))
-            {
-                logger.info("Sphere");
-                startingDim = getSphere(world, pos.getX(), pos.getY(), pos.getZ(), this.radius); //Get sphere from current dimension
-                swapDim = getSphere(dest, pos.getX(), pos.getY(), pos.getZ(), this.radius); //Get sphere from target dimension
-
-                //Set current dimension blocks to target dim blocks
-                setBlocks(swapDim, world);
-
-                //Set target dim blocks to current dim blocks
-                setBlocks(startingDim, dest);
-
-                //Teleport the player
-                Teleporter.TeleportLocation loc = new Teleporter.TeleportLocation(player.posX, player.posY, player.posZ, this.chosenDim, player.cameraPitch, player.getRotationYawHead());
-
-                if (this.chosenDim != player.dimension)
-                {
-                    if (dest.getTileEntity(pos) instanceof TileEntitySeedSwapper)
-                    {
-                        logger.info("Sent Data to block in the target Dimension");
-                        TileEntitySeedSwapper te = (TileEntitySeedSwapper) dest.getTileEntity(pos);
-                        SeedSwapper swapper = (SeedSwapper) dest.getBlockState(pos).getBlock();
-                        te.setData(player.dimension, this.radius);
-                        swapper.setChosenDim(player.dimension);
-
-                    }
-                    loc.teleport(player);
-                    List list = player.getEntityWorld().getLoadedEntityList();
-                    ArrayList<EntityLiving> entitiesToTeleport = new ArrayList<>();
-                    for (Object e : list)
-                    {
-                        if (e instanceof EntityLiving)
-                        {
-                            logger.info(e + " is instanceof EntityLiving");
-                            double distance = Math.sqrt(((EntityLiving) e).getDistanceSq(this.pos));
-                            if (distance <= this.radius)
-                            {
-                                logger.info("Distance: " + distance);
-                                entitiesToTeleport.add((EntityLiving) e);
-                            }
-                        }
-                    }
-                    for (EntityLiving e : entitiesToTeleport)
-                    {
-                        logger.info(e);
-                        Teleporter.TeleportLocation location = new Teleporter.TeleportLocation(e.posX, e.posY, e.posZ, this.chosenDim, e.cameraPitch, e.getRotationYawHead());
-                        location.teleport(e);
-                    }
-                }
-            } else
-            {
-                return false;
-            }
-
-            //Obducted.network.sendToServer(new SeedSwapperMessage("swapper",this.xCoord,this.yCoord,this.zCoord,this.worldObj.provider.dimensionId,this.chosenDim,this.radius));
         }
         return true;
     }
 
-    private boolean hasRedstonePower(BlockPos pos, World world)
+    private void setBlocks(List<CustomBlock> blocks, World world)
     {
-        return world.getStrongPower(pos) != 0;
-    }
-
-    private void setBlocks(ArrayList<CustomBlock> blocks, World world)
-    {
-        logger.info("Setting blocks");
-        logger.info(world.provider.getDimensionType().getName());
-        //for(int i=0;i<blocks.size();i++)
-        while (blocks.size() > 0)
+        for (CustomBlock cb : blocks)
         {
-            CustomBlock cb = blocks.get(0);
-            //FMLLog.log(Level.INFO, "X: %s, Y: %s, Z: %s, Block: %s", cb.x, cb.y, cb.z, cb.block.getUnlocalizedName());
-            if (!(world.getBlockState(cb.pos) instanceof TileEntity)) //Don't replace a TileEntity
+            if (!canSwap(world.getBlock(cb.x, cb.y, cb.z), world.getBlockMetadata(cb.x, cb.y, cb.z))) //Don't replace a TileEntity or Bedrock
             {
-                world.setBlockState(cb.pos, cb.blockState);
+                continue;
             }
-            //world.setBlockMetadataWithNotify(cb.x, cb.y, cb.z, cb.meta, 0);
-            blocks.remove(cb);
+            world.setBlock(cb.x, cb.y, cb.z, cb.block, cb.meta, 3);
         }
     }
 
-    private ArrayList<CustomBlock> getSphere(World world, int centerx, int centery, int centerz, int radius)
+    private List<CustomBlock> getSphere(World world, int centerx, int centery, int centerz, int radius)
     {
-        logger.info("Running getSphere");
-        logger.info(world.provider.getDimension());
-
-        ArrayList<CustomBlock> blockArrayList = new ArrayList<>();
-        blockArrayList.clear();
-        double sqradius = radius * radius;
+        List<CustomBlock> blockArrayList = new ArrayList<>();
+        int sqradius = radius * radius;
 
         for (int x = centerx - radius; x <= centerx + radius; x++)
         {
-            double dxdx = (x - centerx) * (x - centerx);
-            for (int z = centerz - radius; z < centerz + radius; z++)
+            int dxdx = (x - centerx) * (x - centerx);
+            for (int z = centerz - radius; z <= centerz + radius; z++)
             {
-                double dzdz = (z - centerz) * (z - centerz);
-                for (int y = centery - radius; y <= centery + radius; y++)
+                int dzdz = (z - centerz) * (z - centerz);
+                for (int y = Math.max(1, centery - radius); y <= Math.min(world.getHeight() - 1, centery + radius); y++)
                 {
-                    double dydy = (y - centery) * (y - centery);
-
-                    double sqdist = dxdx + dydy + dzdz;
-                    if (sqdist <= sqradius)
+                    int dydy = (y - centery) * (y - centery);
+                    if (dxdx + dydy + dzdz > sqradius)
                     {
-                        if (y > 0)
-                        {
-                            String dbg = "blockPos: " + x + "," + y + "," + z;
-                            BlockPos blockPos = new BlockPos(x, y, z);
-                            logger.info(dbg);
-                            dbg = "Block: " + world.getBlockState(blockPos).getBlock().getUnlocalizedName();
-                            logger.info(dbg);
-
-                            //Don't store Bedrock or TileEntity
-                            if (!(world.getBlockState(blockPos) == Blocks.BEDROCK) || world.getBlockState(blockPos) instanceof TileEntity)
-                            {
-                                blockArrayList.add(new CustomBlock(world.getBlockState(blockPos), blockPos));
-                            }
-                        }
+                        continue;
+                    }
+                    Block block = world.getBlock(x, y, z);
+                    int meta = world.getBlockMetadata(x, y, z);
+                    //Don't store Bedrock or TileEntity (their inventories etc. would be lost)
+                    if (canSwap(block, meta))
+                    {
+                        blockArrayList.add(new CustomBlock(block, x, y, z, meta));
                     }
                 }
             }
         }
         return blockArrayList;
     }
-}
 
+    private static boolean canSwap(Block block, int meta)
+    {
+        return block != Blocks.bedrock
+                && !(block instanceof SeedSwapper)
+                && !block.hasTileEntity(meta);
+    }
+}

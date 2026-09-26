@@ -1,12 +1,11 @@
 package net.neverandy.ob;
 
 
+import cpw.mods.fml.relauncher.Side;
+import cpw.mods.fml.relauncher.SideOnly;
 import net.minecraft.creativetab.CreativeTabs;
 import net.minecraft.init.Items;
 import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraftforge.fml.relauncher.Side;
-import net.minecraftforge.fml.relauncher.SideOnly;
 
 /**
  * Created by andrewweaver on 9/13/16.
@@ -20,17 +19,19 @@ public class Tab extends CreativeTabs
     public Tab(String tabID)
     {
         super(CreativeTabs.getNextID(), "ObductedTab" + tabID);
-        tabIconItem = Items.DIAMOND;
+        tabIconItem = Items.diamond;
         tabLabel = "Obducted " + tabID;
     }
 
     @Override
     @SideOnly(Side.CLIENT)
-    public ItemStack getTabIconItem()
+    public Item getTabIconItem()
     {
-        return new ItemStack(tabIconItem);
+        return tabIconItem;
     }
 
+    @Override
+    @SideOnly(Side.CLIENT)
     public String getTranslatedTabLabel()
     {
         return tabLabel;
