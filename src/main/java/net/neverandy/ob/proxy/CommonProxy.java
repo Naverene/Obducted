@@ -1,21 +1,11 @@
 package net.neverandy.ob.proxy;
 
-import net.minecraft.block.Block;
-import net.minecraft.block.material.MapColor;
-import net.minecraft.block.material.Material;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemBlock;
+import cpw.mods.fml.common.event.FMLInitializationEvent;
+import cpw.mods.fml.common.event.FMLPostInitializationEvent;
+import cpw.mods.fml.common.event.FMLPreInitializationEvent;
+import cpw.mods.fml.common.registry.GameRegistry;
 import net.minecraftforge.common.config.Configuration;
-import net.minecraftforge.event.RegistryEvent;
-import net.minecraftforge.fml.common.Mod;
-import net.minecraftforge.fml.common.event.FMLInitializationEvent;
-import net.minecraftforge.fml.common.event.FMLPostInitializationEvent;
-import net.minecraftforge.fml.common.event.FMLPreInitializationEvent;
-import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
-import net.minecraftforge.fml.common.registry.GameRegistry;
-import net.minecraftforge.registries.IForgeRegistry;
 import net.neverandy.ob.blocks.OBBlock;
-import net.neverandy.ob.blocks.SeedSwapper;
 import net.neverandy.ob.blocks.tiles.TileEntitySeedSwapper;
 import net.neverandy.ob.config.Config;
 import net.neverandy.ob.reference.Reference;
@@ -23,9 +13,7 @@ import net.neverandy.ob.reference.Reference;
 /**
  * Created by awweaver on 7/15/17.
  */
-@Mod.EventBusSubscriber
-public class
-CommonProxy implements IProxy
+public class CommonProxy implements IProxy
 {
     public static Configuration config;
 
@@ -34,6 +22,10 @@ CommonProxy implements IProxy
     {
         config = new Configuration(event.getSuggestedConfigurationFile());
         Config.readConfig();
+
+        //1.7.10 has no registry events, blocks are registered during preInit
+        OBBlock.init();
+        GameRegistry.registerTileEntity(TileEntitySeedSwapper.class, Reference.MOD_ID + "_seedswapper");
     }
 
     @Override
@@ -49,23 +41,5 @@ CommonProxy implements IProxy
         {
             config.save();
         }
-    }
-
-    @SubscribeEvent
-    public static void registerBlocks(RegistryEvent.Register<Block> event)
-    {
-        IForgeRegistry<Block> registry = event.getRegistry();
-        registry.register(new SeedSwapper(Material.ANVIL, MapColor.BLUE));
-        GameRegistry.registerTileEntity(TileEntitySeedSwapper.class, Reference.MOD_ID + "_seedswapper");
-
-    }
-
-    @SubscribeEvent
-    public static void registerItems(RegistryEvent.Register<Item> event)
-    {
-        IForgeRegistry<Item> registry = event.getRegistry();
-        assert OBBlock.seedSwapper != null;
-        registry.register(new ItemBlock(OBBlock.seedSwapper).setRegistryName(OBBlock.seedSwapper.getRegistryName()));
-
     }
 }

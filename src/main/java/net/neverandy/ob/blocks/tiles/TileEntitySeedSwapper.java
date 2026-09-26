@@ -1,24 +1,23 @@
 package net.neverandy.ob.blocks.tiles;
 
-import net.minecraft.block.state.IBlockState;
-import net.minecraft.entity.Entity;
+import java.util.ArrayList;
+import java.util.List;
+
+import net.minecraft.block.Block;
 import net.minecraft.entity.EntityLivingBase;
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.init.Blocks;
 import net.minecraft.nbt.NBTTagCompound;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.tileentity.TileEntity;
-import net.minecraft.util.math.AxisAlignedBB;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.text.TextComponentString;
+import net.minecraft.util.AxisAlignedBB;
+import net.minecraft.util.ChatComponentText;
 import net.minecraft.world.World;
 import net.minecraft.world.WorldServer;
 import net.minecraftforge.common.DimensionManager;
 import net.neverandy.ob.blocks.SeedSwapper;
 import net.neverandy.ob.util.CustomBlock;
 import net.neverandy.ob.util.SwapTeleporter;
-
-import java.util.ArrayList;
-import java.util.List;
 
 import static net.neverandy.ob.Obducted.logger;
 
@@ -46,20 +45,17 @@ public class TileEntitySeedSwapper extends TileEntity
 
         this.radius = nbt.hasKey("radius") ? nbt.getInteger("radius") : DEFAULT_RADIUS;
         this.chosenDim = nbt.getInteger("targetDim");
-        // Swappers saved before the "linked" flag existed still have a target
-        this.linked = nbt.hasKey("linked") ? nbt.getBoolean("linked") : nbt.hasKey("targetDim");
+        this.linked = nbt.getBoolean("linked");
     }
 
     @Override
-    public NBTTagCompound writeToNBT(NBTTagCompound nbt)
+    public void writeToNBT(NBTTagCompound nbt)
     {
         super.writeToNBT(nbt);
 
         nbt.setInteger("targetDim", this.chosenDim);
         nbt.setInteger("radius", this.radius);
         nbt.setBoolean("linked", this.linked);
-
-        return nbt;
     }
 
     public void setData(int dimID, int radius)
@@ -81,7 +77,7 @@ public class TileEntitySeedSwapper extends TileEntity
         return chosenDim;
     }
 
-    public boolean onBlockActivated(World world, BlockPos pos, EntityPlayer player)
+    public boolean onBlockActivated(World world, int x, int y, int z, EntityPlayer player)
     {
         if (world.isRemote)
         {
@@ -89,48 +85,50 @@ public class TileEntitySeedSwapper extends TileEntity
         }
 
         //Just as in the game that this idea came from, this requires two things to happen, Move the "lever" then click the block.
-        if (!world.isBlockPowered(pos))
+        if (!world.isBlockIndirectlyGettingPowered(x, y, z))
         {
-            player.sendMessage(new TextComponentString("The swapper needs redstone power."));
+            player.addChatMessage(new ChatComponentText("The swapper needs redstone power."));
             return true;
         }
 
-        int sourceDim = world.provider.getDimension();
+        int sourceDim = world.provider.dimensionId;
         if (!linked || chosenDim == sourceDim || !DimensionManager.isDimensionRegistered(chosenDim))
         {
-            logger.warn("Seed swapper at " + pos + " in dim " + sourceDim + " has no valid target (target: " + chosenDim + ", linked: " + linked + ")");
-            player.sendMessage(new TextComponentString("This swapper isn't linked to another dimension. Break it and place it again."));
+            logger.warn("Seed swapper at " + x + ", " + y + ", " + z + " in dim " + sourceDim + " has no valid target (target: " + chosenDim + ", linked: " + linked + ")");
+            player.addChatMessage(new ChatComponentText("This swapper isn't linked to another dimension. Break it and place it again."));
             return true;
         }
 
         //Loads the target dimension if nobody is in it (DimensionManager.getWorld would just return null)
-        WorldServer dest = world.getMinecraftServer().getWorld(chosenDim);
+        WorldServer dest = MinecraftServer.getServer().worldServerForDimension(chosenDim);
         if (dest == null)
         {
-            player.sendMessage(new TextComponentString("Dimension " + chosenDim + " could not be loaded."));
+            player.addChatMessage(new ChatComponentText("Dimension " + chosenDim + " could not be loaded."));
             return true;
         }
 
         //Make sure the partner points back here so the trip can be reversed
-        TileEntity partner = dest.getTileEntity(pos);
+        TileEntity partner = dest.getTileEntity(x, y, z);
         if (partner instanceof TileEntitySeedSwapper)
         {
             ((TileEntitySeedSwapper) partner).setData(sourceDim, this.radius);
         }
 
         //Grab everything that should come along before anything moves
-        AxisAlignedBB area = new AxisAlignedBB(pos).grow(this.radius);
+        double cx = x + 0.5, cy = y + 0.5, cz = z + 0.5;
+        AxisAlignedBB area = AxisAlignedBB.getBoundingBox(cx - radius, cy - radius, cz - radius, cx + radius, cy + radius, cz + radius);
         List<EntityLivingBase> passengers = new ArrayList<>();
-        for (EntityLivingBase e : world.getEntitiesWithinAABB(EntityLivingBase.class, area))
+        for (Object o : world.getEntitiesWithinAABB(EntityLivingBase.class, area))
         {
-            if (e != player && !e.isRiding() && !e.isBeingRidden() && e.getDistanceSq(pos) <= this.radius * this.radius)
+            EntityLivingBase e = (EntityLivingBase) o;
+            if (e != player && e.ridingEntity == null && e.riddenByEntity == null && e.getDistanceSq(cx, cy, cz) <= radius * radius)
             {
                 passengers.add(e);
             }
         }
 
-        ArrayList<CustomBlock> startingDim = getSphere(world, pos, this.radius); //Get sphere from current dimension
-        ArrayList<CustomBlock> swapDim = getSphere(dest, pos, this.radius); //Get sphere from target dimension
+        List<CustomBlock> startingDim = getSphere(world, x, y, z, this.radius); //Get sphere from current dimension
+        List<CustomBlock> swapDim = getSphere(dest, x, y, z, this.radius); //Get sphere from target dimension
 
         //Set current dimension blocks to target dim blocks
         setBlocks(swapDim, world);
@@ -139,9 +137,9 @@ public class TileEntitySeedSwapper extends TileEntity
         setBlocks(startingDim, dest);
 
         //Teleport the player, then everything else that was inside the sphere
-        if (player.isRiding())
+        if (player.ridingEntity != null)
         {
-            player.dismountRidingEntity();
+            player.mountEntity(null);
         }
         SwapTeleporter.teleport(player, chosenDim, player.posX, player.posY, player.posZ);
         for (EntityLivingBase e : passengers)
@@ -154,44 +152,53 @@ public class TileEntitySeedSwapper extends TileEntity
         return true;
     }
 
-    private void setBlocks(ArrayList<CustomBlock> blocks, World world)
+    private void setBlocks(List<CustomBlock> blocks, World world)
     {
         for (CustomBlock cb : blocks)
         {
-            IBlockState existing = world.getBlockState(cb.pos);
-            if (!canSwap(existing)) //Don't replace a TileEntity or Bedrock
+            if (!canSwap(world.getBlock(cb.x, cb.y, cb.z), world.getBlockMetadata(cb.x, cb.y, cb.z))) //Don't replace a TileEntity or Bedrock
             {
                 continue;
             }
-            world.setBlockState(cb.pos, cb.blockState);
+            world.setBlock(cb.x, cb.y, cb.z, cb.block, cb.meta, 3);
         }
     }
 
-    private ArrayList<CustomBlock> getSphere(World world, BlockPos center, int radius)
+    private List<CustomBlock> getSphere(World world, int centerx, int centery, int centerz, int radius)
     {
-        ArrayList<CustomBlock> blockArrayList = new ArrayList<>();
+        List<CustomBlock> blockArrayList = new ArrayList<>();
         int sqradius = radius * radius;
 
-        for (BlockPos.MutableBlockPos p : BlockPos.getAllInBoxMutable(center.add(-radius, -radius, -radius), center.add(radius, radius, radius)))
+        for (int x = centerx - radius; x <= centerx + radius; x++)
         {
-            if (p.getY() <= 0 || p.getY() >= world.getHeight() || p.distanceSq(center) > sqradius)
+            int dxdx = (x - centerx) * (x - centerx);
+            for (int z = centerz - radius; z <= centerz + radius; z++)
             {
-                continue;
-            }
-            IBlockState state = world.getBlockState(p);
-            //Don't store Bedrock or TileEntity (their inventories etc. would be lost)
-            if (canSwap(state))
-            {
-                blockArrayList.add(new CustomBlock(state, p.toImmutable()));
+                int dzdz = (z - centerz) * (z - centerz);
+                for (int y = Math.max(1, centery - radius); y <= Math.min(world.getHeight() - 1, centery + radius); y++)
+                {
+                    int dydy = (y - centery) * (y - centery);
+                    if (dxdx + dydy + dzdz > sqradius)
+                    {
+                        continue;
+                    }
+                    Block block = world.getBlock(x, y, z);
+                    int meta = world.getBlockMetadata(x, y, z);
+                    //Don't store Bedrock or TileEntity (their inventories etc. would be lost)
+                    if (canSwap(block, meta))
+                    {
+                        blockArrayList.add(new CustomBlock(block, x, y, z, meta));
+                    }
+                }
             }
         }
         return blockArrayList;
     }
 
-    private static boolean canSwap(IBlockState state)
+    private static boolean canSwap(Block block, int meta)
     {
-        return state.getBlock() != Blocks.BEDROCK
-                && !(state.getBlock() instanceof SeedSwapper)
-                && !state.getBlock().hasTileEntity(state);
+        return block != Blocks.bedrock
+                && !(block instanceof SeedSwapper)
+                && !block.hasTileEntity(meta);
     }
 }

@@ -2,7 +2,7 @@ package net.neverandy.ob;
 
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.world.World;
-import net.minecraftforge.fml.common.network.IGuiHandler;
+import cpw.mods.fml.common.network.IGuiHandler;
 
 /**
  * Created by andrewweaver on 9/13/16.
