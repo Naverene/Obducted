@@ -1,0 +1,8 @@
+{
+  "variants": {
+    "facing=north": { "model": "ob:block/seedswapper" },
+    "facing=east": { "model": "ob:block/seedswapper", "y": 90 },
+    "facing=south": { "model": "ob:block/seedswapper", "y": 180 },
+    "facing=west": { "model": "ob:block/seedswapper", "y": 270 }
+  }
+}

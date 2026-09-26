@@ -3,180 +3,133 @@ package net.neverandy.ob.blocks;
 import java.util.ArrayList;
 import java.util.List;
 
-import cpw.mods.fml.relauncher.Side;
-import cpw.mods.fml.relauncher.SideOnly;
-import net.minecraft.block.Block;
-import net.minecraft.block.material.Material;
-import net.minecraft.client.renderer.texture.IIconRegister;
-import net.minecraft.entity.EntityLivingBase;
-import net.minecraft.entity.player.EntityPlayer;
-import net.minecraft.item.ItemStack;
-import net.minecraft.server.MinecraftServer;
-import net.minecraft.tileentity.TileEntity;
-import net.minecraft.util.ChatComponentText;
-import net.minecraft.util.IIcon;
-import net.minecraft.util.MathHelper;
-import net.minecraft.world.World;
-import net.minecraft.world.WorldServer;
-import net.minecraftforge.common.DimensionManager;
-import net.neverandy.ob.blocks.tiles.TileEntitySeedSwapper;
-import net.neverandy.ob.reference.Reference;
+import javax.annotation.Nullable;
+
+import com.mojang.serialization.MapCodec;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.InteractionResult;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.context.BlockPlaceContext;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.EntityBlock;
+import net.minecraft.world.level.block.HorizontalDirectionalBlock;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.StateDefinition;
+import net.minecraft.world.phys.BlockHitResult;
 
 import static net.neverandy.ob.Obducted.logger;
-import static net.neverandy.ob.Obducted.tab;
 
 /**
  * Created by awweaver on 7/15/17.
  */
-public class SeedSwapper extends Block
+public class SeedSwapper extends HorizontalDirectionalBlock implements EntityBlock
 {
-    //Metadata holds which side the front faces, same numbering as the furnace (2-5)
-    private static final int[] FACING_BY_ROTATION = {2, 5, 3, 4};
+    public static final MapCodec<SeedSwapper> CODEC = simpleCodec(SeedSwapper::new);
 
-    @SideOnly(Side.CLIENT)
-    private IIcon iconTop;
-    @SideOnly(Side.CLIENT)
-    private IIcon iconBottom;
-    @SideOnly(Side.CLIENT)
-    private IIcon iconFront;
-
-    public SeedSwapper(Material blockMaterialIn)
+    public SeedSwapper(Properties properties)
     {
-        super(blockMaterialIn);
-        setCreativeTab(tab);
-
-        setHardness(5.0F);
-        setResistance(2000.0F);
-        setHarvestLevel("pickaxe", 2);
-        setStepSound(Block.soundTypeAnvil);
-        setBlockName("seedswapper");
-        setBlockTextureName(Reference.MOD_ID + ":seedswapper/seedswapperside");
+        super(properties);
+        registerDefaultState(stateDefinition.any().setValue(FACING, Direction.NORTH));
     }
 
     @Override
-    @SideOnly(Side.CLIENT)
-    public void registerBlockIcons(IIconRegister register)
+    protected MapCodec<? extends HorizontalDirectionalBlock> codec()
     {
-        String base = Reference.MOD_ID + ":seedswapper/seedswapper";
-        blockIcon = register.registerIcon(base + "side");
-        iconTop = register.registerIcon(base + "top");
-        iconBottom = register.registerIcon(base + "bottom");
-        iconFront = register.registerIcon(base + "front");
+        return CODEC;
     }
 
     @Override
-    @SideOnly(Side.CLIENT)
-    public IIcon getIcon(int side, int meta)
+    protected void createBlockStateDefinition(StateDefinition.Builder<Block, BlockState> builder)
     {
-        if (side == 0)
-        {
-            return iconBottom;
-        }
-        if (side == 1)
-        {
-            return iconTop;
-        }
-        //meta 0 is the item in the inventory, show the front facing the player
-        if (side == meta || (meta == 0 && side == 3))
-        {
-            return iconFront;
-        }
-        return blockIcon;
+        builder.add(FACING);
     }
 
     @Override
-    public boolean hasTileEntity(int metadata)
+    public BlockState getStateForPlacement(BlockPlaceContext context)
     {
-        return true;
+        //Front faces the player that placed it
+        return defaultBlockState().setValue(FACING, context.getHorizontalDirection().getOpposite());
     }
 
     @Override
-    public TileEntity createTileEntity(World world, int metadata)
+    public BlockEntity newBlockEntity(BlockPos pos, BlockState state)
     {
-        return new TileEntitySeedSwapper();
+        return new SeedSwapperBlockEntity(pos, state);
     }
 
     @Override
-    public void onBlockPlacedBy(World worldIn, int x, int y, int z, EntityLivingBase placer, ItemStack stack)
+    public void setPlacedBy(Level level, BlockPos pos, BlockState state, @Nullable LivingEntity placer, ItemStack stack)
     {
-        int rotation = MathHelper.floor_double(placer.rotationYaw * 4.0F / 360.0F + 0.5D) & 3;
-        int facing = FACING_BY_ROTATION[rotation];
-        worldIn.setBlockMetadataWithNotify(x, y, z, facing, 2);
-
-        if (worldIn.isRemote)
+        super.setPlacedBy(level, pos, state, placer, stack);
+        if (!(level instanceof ServerLevel serverLevel) || !(level.getBlockEntity(pos) instanceof SeedSwapperBlockEntity swapper))
         {
             return;
         }
 
-        TileEntity te = worldIn.getTileEntity(x, y, z);
-        if (!(te instanceof TileEntitySeedSwapper))
+        ServerLevel target = pickTargetDim(serverLevel, pos);
+        if (target == null)
         {
-            return;
-        }
-
-        int sourceDim = worldIn.provider.dimensionId;
-        Integer chosenDim = pickTargetDim(worldIn);
-        //worldServerForDimension loads the dimension if nobody is in it
-        WorldServer targetDim = chosenDim == null ? null : MinecraftServer.getServer().worldServerForDimension(chosenDim);
-        if (targetDim == null)
-        {
-            logger.warn("Seed swapper placed in dim " + sourceDim + " but no other dimension could be loaded");
-            if (placer instanceof EntityPlayer)
+            logger.warn("Seed swapper placed in {} at {} but no other dimension has room for it", level.dimension().location(), pos);
+            if (placer instanceof Player player)
             {
-                ((EntityPlayer) placer).addChatMessage(new ChatComponentText("The swapper couldn't find another dimension to link to."));
+                player.displayClientMessage(Component.translatable("message.ob.no_dimension"), true);
             }
             return;
         }
 
-        //Each placed swapper remembers its own target on its tile entity
-        ((TileEntitySeedSwapper) te).setData(chosenDim, TileEntitySeedSwapper.DEFAULT_RADIUS);
+        //Each placed swapper remembers its own target on its block entity
+        swapper.link(target.dimension());
 
         //Put a partner swapper in the target dimension that points back here
-        if (!(targetDim.getBlock(x, y, z) instanceof SeedSwapper))
+        if (!(target.getBlockState(pos).getBlock() instanceof SeedSwapper))
         {
-            targetDim.setBlock(x, y, z, this, facing, 3);
+            target.setBlock(pos, state, Block.UPDATE_ALL);
         }
-        TileEntity partner = targetDim.getTileEntity(x, y, z);
-        if (partner instanceof TileEntitySeedSwapper)
+        if (target.getBlockEntity(pos) instanceof SeedSwapperBlockEntity partner)
         {
-            ((TileEntitySeedSwapper) partner).setData(sourceDim, TileEntitySeedSwapper.DEFAULT_RADIUS);
-            logger.info("Linked seed swapper at " + x + ", " + y + ", " + z + " between dim " + sourceDim + " and dim " + chosenDim);
+            partner.link(level.dimension());
+            logger.info("Linked seed swapper at {} between {} and {}", pos, level.dimension().location(), target.dimension().location());
         }
     }
 
     @Override
-    public boolean onBlockActivated(World worldIn, int x, int y, int z, EntityPlayer playerIn, int side, float hitX, float hitY, float hitZ)
+    protected InteractionResult useWithoutItem(BlockState state, Level level, BlockPos pos, Player player, BlockHitResult hitResult)
     {
-        if (worldIn.isRemote)
+        if (level instanceof ServerLevel serverLevel && level.getBlockEntity(pos) instanceof SeedSwapperBlockEntity swapper)
         {
-            return true;
+            swapper.activate(serverLevel, pos, player);
         }
-        TileEntity te = worldIn.getTileEntity(x, y, z);
-        if (te instanceof TileEntitySeedSwapper)
-        {
-            return ((TileEntitySeedSwapper) te).onBlockActivated(worldIn, x, y, z, playerIn);
-        }
-        return true;
+        return InteractionResult.sidedSuccess(level.isClientSide);
     }
 
     /**
-     * Picks a random registered dimension other than the one the world is in, or null if there isn't one.
+     * Picks a random dimension other than the current one where the swapper's position is inside the build height,
+     * or null if there isn't one.
      */
-    private static Integer pickTargetDim(World world)
+    @Nullable
+    private static ServerLevel pickTargetDim(ServerLevel level, BlockPos pos)
     {
-        int dimension = world.provider.dimensionId;
-        List<Integer> dimensions = new ArrayList<>();
-        for (int id : DimensionManager.getStaticDimensionIDs())
+        List<ServerLevel> dimensions = new ArrayList<>();
+        for (ResourceKey<Level> key : level.getServer().levelKeys())
         {
-            if (id != dimension)
+            ServerLevel other = level.getServer().getLevel(key);
+            if (other != null && other != level && !other.isOutsideBuildHeight(pos))
             {
-                dimensions.add(id);
+                dimensions.add(other);
             }
         }
         if (dimensions.isEmpty())
         {
             return null;
         }
-        return dimensions.get(world.rand.nextInt(dimensions.size()));
+        return dimensions.get(level.random.nextInt(dimensions.size()));
     }
 }

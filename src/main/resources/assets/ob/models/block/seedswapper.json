@@ -1,0 +1,9 @@
+{
+  "parent": "minecraft:block/orientable_with_bottom",
+  "textures": {
+    "top": "ob:block/seedswapper/seedswappertop",
+    "bottom": "ob:block/seedswapper/seedswapperbottom",
+    "side": "ob:block/seedswapper/seedswapperside",
+    "front": "ob:block/seedswapper/seedswapperfront"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "block.ob.seedswapper": "Seed Swapper",
+  "itemGroup.ob": "Obducted",
+  "message.ob.needs_power": "The swapper needs redstone power.",
+  "message.ob.not_linked": "This swapper isn't linked to another dimension. Break it and place it again.",
+  "message.ob.target_missing": "The swapper can't reach %s.",
+  "message.ob.no_dimension": "The swapper couldn't find another dimension to link to."
+}

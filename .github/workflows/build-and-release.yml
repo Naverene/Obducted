@@ -1,10 +1,10 @@
-name: Build and release (1.7.10)
+name: Build and release (1.21.1)
 
 on:
   push:
-    branches: [mc-1.7.10]
+    branches: [mc-1.21.1]
   pull_request:
-    branches: [mc-1.7.10]
+    branches: [mc-1.21.1]
   workflow_dispatch:
 
 permissions:
@@ -18,35 +18,27 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      MC_VERSION: 1.7.10
-      # The GTNH buildscript uses this instead of deriving the version from git tags
+      MC_VERSION: 1.21.1
       VERSION: 1.0.${{ github.run_number }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      # 8 compiles/runs Minecraft, 17 runs Jabel, 25 runs the Gradle daemon (gradle/gradle-daemon-jvm.properties)
+      # Minecraft 1.21.1 runs on Java 21
       - uses: actions/setup-java@v4
         with:
-          distribution: zulu
-          java-version: |
-            8
-            17
-            25
+          distribution: temurin
+          java-version: 21
 
       - uses: gradle/actions/setup-gradle@v4
 
       - name: Build
-        run: ./gradlew build -Dorg.gradle.java.installations.fromEnv=JAVA_HOME_8_X64,JAVA_HOME_17_X64,JAVA_HOME_25_X64
+        run: ./gradlew build
 
       - name: Collect mod jar
         id: jar
         run: |
-          src="build/libs/ob-${VERSION}.jar"
-          test -f "$src" || { ls -la build/libs; exit 1; }
           jar="build/libs/Obducted-${MC_VERSION}-${VERSION}.jar"
-          cp "$src" "$jar"
+          test -f "$jar" || { ls -la build/libs; exit 1; }
           echo "path=$jar" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v4
@@ -69,5 +61,5 @@ jobs:
           gh release create "$tag" "$JAR" \
             --target "${{ github.sha }}" \
             --title "Obducted ${MC_VERSION} build ${{ github.run_number }}" \
-            --notes "Automated build of \`${GITHUB_REF_NAME}\` at ${GITHUB_SHA::7} for Minecraft ${MC_VERSION} (Forge 10.13.4.1614)." \
+            --notes "Automated build of \`${GITHUB_REF_NAME}\` at ${GITHUB_SHA::7} for Minecraft ${MC_VERSION} (NeoForge 21.1.251)." \
             --latest=false
